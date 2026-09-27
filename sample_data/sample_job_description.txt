@@ -1,0 +1,7 @@
+Job Title: Machine Learning Engineer
+
+We are looking for a Machine Learning Engineer with strong experience in Python,
+Natural Language Processing (NLP), and predictive modeling. The candidate should
+be skilled in building and deploying machine learning models using frameworks such
+as scikit-learn, TensorFlow, or PyTorch. Experience with data analysis, SQL, and
+cloud platforms (AWS/Azure) is preferred.

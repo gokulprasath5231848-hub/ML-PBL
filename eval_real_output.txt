@@ -1,0 +1,34 @@
+$ python eval_real.py
+Job description : sample_data/sample_job_description.txt
+Resumes         : sample_data/sample_resumes_large.csv  (12 candidates)
+Skills extracted: 9 from the JD -> machine learning, python, natural language processing, scikit-learn, tensorflow, pytorch, data analysis, sql, cloud
+
+Rank Candidate             Baseline   Hybrid   Delta   Skills  Verdict
+1    Asha Kumar            39.3       39.4     +0.1    8/9     STRONG MATCH
+2    Karthik Subramanian   39.3       35.5     -3.8    7/9     STRONG MATCH
+3    Meera Raghavan        30.9       26.8     -4.1    4/9     MODERATE MATCH
+4    Priya Nair            22.9       26.4     +3.5    4/9     MODERATE MATCH
+5    Nithya Balaji         28.6       25.1     -3.5    5/9     MODERATE MATCH
+6    Sanjay Iyer           19.5       18.6     -0.9    5/9     MODERATE MATCH
+7    Lakshmi Venkatesh     20.2       16.7     -3.5    4/9     MODERATE MATCH
+8    Ravi Menon            8.9        16.4     +7.5    2/9     WEAK MATCH
+9    Rahul Deshpande       12.4       13.7     +1.3    2/9     WEAK MATCH
+10   Divya Krishnan        11.4       10.3     -1.1    4/9     MODERATE MATCH
+11   Arjun Pillai          0.0        3.0      +3.0    1/9     WEAK MATCH
+12   Vikram Chandrasekar   4.3        2.9      -1.4    1/9     WEAK MATCH
+
+--- Effect of synonym normalisation on the ranking ---
+Candidates whose score rose : 5/12
+Largest single gain         : +7.5 points (Ravi Menon)
+Candidates that change rank : 9/12
+
+--- Scarcest requirements across the pool ---
+data analysis                 2/12 candidates (17%)
+tensorflow                    2/12 candidates (17%)
+natural language processing   4/12 candidates (33%)
+
+--- Synonym case (spelled-out resume vs abbreviated JD) ---
+Baseline TF-IDF : 9.1%  (literal keyword overlap)
+Hybrid Match    : 20.3%  (after normalize_text)
+Gain            : +11.2 points
+Checklist       : 5/6  ->  STRONG MATCH

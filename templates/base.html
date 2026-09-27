@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>{% block title %}Resume Screening{% endblock %}</title>
+<link href="{{ url_for('static', filename='app.css') }}" rel="stylesheet"/>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="{{ url_for('index') }}">
+    <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="0.75" y="0.75" width="14.5" height="14.5" rx="3.5" stroke="#09090b" stroke-width="1.5"/>
+      <path d="M4.2 8.4l2.4 2.4 5-5.4" stroke="#09090b" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Resume Screening
+    <span class="brand-sub">{% block subtitle %}Screen &amp; rank{% endblock %}</span>
+  </a>
+  <div class="topbar-actions">{% block actions %}{% endblock %}</div>
+</header>
+
+{% block body %}{% endblock %}
+
+</body>
+</html>

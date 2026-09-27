@@ -1,0 +1,544 @@
+{% extends "base.html" %}
+{% block title %}Screening results{% endblock %}
+{% block subtitle %}Review{% endblock %}
+
+{% block actions %}
+  <a class="btn btn-sm" href="{{ url_for('download') }}">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M8 2v8M4.6 6.8L8 10.2l3.4-3.4" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M2.6 12.6h10.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    Export CSV
+  </a>
+  <a class="btn btn-sm btn-primary" href="{{ url_for('index') }}">New screening</a>
+{% endblock %}
+
+{% block body %}
+
+{% for n in notices %}
+<div class="alert alert-note" style="margin:12px 20px 0;border-radius:var(--r-md)">
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M8 1.8l6.2 11.4H1.8L8 1.8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M8 6.4v2.6M8 11.3h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </svg>
+  <div>{{ n }}</div>
+</div>
+{% endfor %}
+
+<div class="review">
+
+  <!-- ======================== ranked rail ============================ -->
+  <aside class="rail">
+    <div class="rail-head">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="t-label">Ranked by</span>
+        <div class="segmented" role="group" aria-label="Scoring mode" style="margin-left:auto">
+          <button type="button" id="modeBaseline" aria-pressed="false">Baseline</button>
+          <button type="button" id="modeHybrid"   aria-pressed="true">Hybrid</button>
+        </div>
+      </div>
+      <p class="t-caption" id="modeNote" style="margin:7px 0 0">
+        Synonym-aware scoring. Switch to baseline to see the ranking move.
+      </p>
+      <div class="slider-wrap">
+        <span class="t-caption" style="flex:none">Strong at</span>
+        <input type="range" id="thresh" min="10" max="90" step="5"
+               value="{{ (strong_threshold * 100) | int }}"
+               aria-label="Coverage required for a Strong Match"/>
+        <span class="t-caption num" id="threshVal" style="flex:none;width:34px;text-align:right">
+          {{ (strong_threshold * 100) | int }}%
+        </span>
+      </div>
+    </div>
+
+    <div class="rail-list" id="rail" role="listbox" aria-label="Candidates"></div>
+
+    <div style="padding:9px 14px;border-top:1px solid var(--border);background:var(--bg)">
+      <span class="t-caption"><kbd>↑</kbd> <kbd>↓</kbd> to move between candidates</span>
+    </div>
+  </aside>
+
+  <!-- ======================== detail panel =========================== -->
+  <main class="detail">
+    <div class="summary">
+      <div class="summary-cell">
+        <div class="v num">{{ total_candidates }}</div>
+        <div class="k">Screened</div>
+      </div>
+      <div class="summary-cell">
+        <div class="v num" id="sumStrong">{{ verdict_counts.strong }}</div>
+        <div class="k">Strong match</div>
+      </div>
+      <div class="summary-cell">
+        <div class="v num" id="sumModerate">{{ verdict_counts.moderate }}</div>
+        <div class="k">Moderate</div>
+      </div>
+      <div class="summary-cell">
+        <div class="v num">{{ required_skills | length }}</div>
+        <div class="k">Skills checked</div>
+      </div>
+      <div class="summary-cell">
+        <div class="v num">{{ lifted }}</div>
+        <div class="k">Lifted by synonyms</div>
+      </div>
+    </div>
+
+    <div style="padding:13px 32px 0;border-bottom:1px solid var(--border)">
+      <div class="segmented" role="tablist" aria-label="Detail view">
+        <button type="button" role="tab" id="tabCandidate" aria-selected="true">Candidate</button>
+        <button type="button" role="tab" id="tabPool"      aria-selected="false">Pool insights</button>
+        <button type="button" role="tab" id="tabCompare"   aria-selected="false">Compare</button>
+      </div>
+      <div style="height:13px"></div>
+    </div>
+
+    <div class="detail-inner" id="panel"></div>
+  </main>
+</div>
+
+<script id="resultsData" type="application/json">{{ results_json | safe }}</script>
+<script id="insightsData" type="application/json">{{ insights | tojson }}</script>
+
+<script>
+(function () {
+  var DATA     = JSON.parse(document.getElementById('resultsData').textContent);
+  var INSIGHTS = JSON.parse(document.getElementById('insightsData').textContent);
+  var MODERATE = {{ moderate_threshold }};
+
+  var state = {
+    mode: 'hybrid',
+    strongT: {{ strong_threshold }},
+    selected: DATA.length ? DATA[0].Candidate : null,
+    tab: 'candidate',
+    compare: []
+  };
+
+  var rail  = document.getElementById('rail');
+  var panel = document.getElementById('panel');
+
+  /* ------------------------------------------------------------------ *
+   * helpers
+   * ------------------------------------------------------------------ */
+
+  function scoreOf(r) {
+    return state.mode === 'hybrid' ? r['Hybrid_Match_%'] : r['Baseline_TFIDF_%'];
+  }
+
+  function verdictOf(r) {
+    if (r.Coverage >= state.strongT) return 'STRONG MATCH';
+    if (r.Coverage >= MODERATE)      return 'MODERATE MATCH';
+    return 'WEAK MATCH';
+  }
+
+  function verdictClass(v) {
+    return v === 'STRONG MATCH' ? 'v-strong'
+         : v === 'MODERATE MATCH' ? 'v-moderate' : 'v-weak';
+  }
+
+  /* Each verdict gets its own glyph as well as its own colour, so the three
+     states stay distinguishable in greyscale and for colour-blind readers. */
+  function verdictGlyph(v) {
+    if (v === 'STRONG MATCH')
+      return '<svg class="glyph" viewBox="0 0 8 8" aria-hidden="true">' +
+             '<circle cx="4" cy="4" r="3.4" fill="currentColor"/></svg>';
+    if (v === 'MODERATE MATCH')
+      return '<svg class="glyph" viewBox="0 0 8 8" aria-hidden="true">' +
+             '<rect x="0.8" y="0.8" width="6.4" height="6.4" rx="1" fill="currentColor"/></svg>';
+    return '<svg class="glyph" viewBox="0 0 8 8" aria-hidden="true">' +
+           '<path d="M4 0.6L7.6 7H0.4L4 0.6z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
+  }
+
+  function verdictPill(v) {
+    return '<span class="verdict ' + verdictClass(v) + '">' + verdictGlyph(v) +
+           v.replace(' MATCH', '') + '</span>';
+  }
+
+  function meter(matched, total, big) {
+    var s = '<span class="meter' + (big ? ' lg' : '') + '" role="img" aria-label="' +
+            matched + ' of ' + total + ' skills matched">';
+    for (var i = 0; i < total; i++) s += '<i class="' + (i < matched ? 'on' : '') + '"></i>';
+    return s + '</span>';
+  }
+
+  function sorted() {
+    return DATA.slice().sort(function (a, b) { return scoreOf(b) - scoreOf(a); });
+  }
+
+  function median(values) {
+    if (!values.length) return 0;
+    var v = values.slice().sort(function (a, b) { return a - b; });
+    var m = Math.floor(v.length / 2);
+    return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * rail — with a FLIP reorder animation, so switching the scoring mode
+   * physically shows how synonym normalisation changes the shortlist.
+   * ------------------------------------------------------------------ */
+
+  function renderRail(animate) {
+    var before = {};
+    if (animate) {
+      Array.prototype.forEach.call(rail.children, function (el) {
+        before[el.dataset.name] = el.getBoundingClientRect().top;
+      });
+    }
+
+    rail.textContent = '';
+    sorted().forEach(function (r, i) {
+      var v = verdictOf(r);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'crow';
+      btn.dataset.name = r.Candidate;
+      btn.setAttribute('role', 'option');
+      btn.setAttribute('aria-current', r.Candidate === state.selected ? 'true' : 'false');
+      btn.setAttribute('aria-selected', r.Candidate === state.selected ? 'true' : 'false');
+
+      var delta = r.Delta > 0 ? '<span class="delta up">+' + r.Delta.toFixed(1) + '</span>'
+                : r.Delta < 0 ? '<span class="delta down">' + r.Delta.toFixed(1) + '</span>'
+                : '';
+
+      btn.innerHTML =
+        '<span class="crow-top">' +
+          '<span class="crow-rank num">' + (i + 1) + '</span>' +
+          '<span class="crow-name">' + esc(r.Candidate) + '</span>' +
+          '<span class="crow-score num">' + scoreOf(r).toFixed(1) + '%</span>' +
+        '</span>' +
+        '<span class="crow-bottom">' +
+          meter(r.Matched_Count, r.Total_Skills) +
+          '<span class="meter-txt">' + r.Matched_Count + '/' + r.Total_Skills + '</span>' +
+          verdictPill(v) + delta +
+        '</span>';
+
+      btn.onclick = function () {
+        state.selected = r.Candidate;
+        state.tab = 'candidate';
+        syncTabs();
+        renderRail(false);
+        renderPanel();
+      };
+      rail.appendChild(btn);
+    });
+
+    if (animate) {
+      Array.prototype.forEach.call(rail.children, function (el) {
+        var prev = before[el.dataset.name];
+        if (prev === undefined) return;
+        var shift = prev - el.getBoundingClientRect().top;
+        if (!shift) return;
+        el.style.transform = 'translateY(' + shift + 'px)';
+        el.style.transition = 'none';
+        requestAnimationFrame(function () {
+          el.style.transition = 'transform var(--t-slow) var(--ease)';
+          el.style.transform = '';
+        });
+      });
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * panels
+   * ------------------------------------------------------------------ */
+
+  function candidatePanel() {
+    var r = DATA.filter(function (d) { return d.Candidate === state.selected; })[0];
+    if (!r) return '<div class="empty"><h2>No candidate selected</h2></div>';
+
+    var v = verdictOf(r);
+    var score = scoreOf(r);
+    var med = median(DATA.map(scoreOf));
+    var rank = sorted().findIndex(function (d) { return d.Candidate === r.Candidate; }) + 1;
+
+    /* Bars are drawn relative to the largest contributor, not to 100%, so the
+       ranking between terms stays readable. The printed figure is the true
+       share of the score either way. */
+    var topShare = Math.max.apply(null, r.Top_Contributing_Terms.map(function (t) {
+      return t.share;
+    }).concat([1]));
+
+    var bars = r.Top_Contributing_Terms.map(function (t) {
+      var w = Math.max(2, t.share / topShare * 100);
+      return '<div class="bar-row">' +
+               '<div class="bar-term" title="' + esc(t.term) + '">' + esc(t.term) + '</div>' +
+               '<div class="bar-track"><div class="bar-fill" style="width:' + w + '%"></div></div>' +
+               '<div class="bar-val">' + t.share.toFixed(1) + '%</div>' +
+             '</div>';
+    }).join('');
+
+    var matched = r.Matched_Skills.map(function (s) {
+      return '<span class="skill-chip skill-yes">' +
+        '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">' +
+        '<path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" stroke-width="1.9" ' +
+        'stroke-linecap="round" stroke-linejoin="round"/></svg>' + esc(s) + '</span>';
+    }).join('') || '<span class="t-caption">None of the required skills were found.</span>';
+
+    var missing = r.Missing_Skills.map(function (s) {
+      return '<span class="skill-chip skill-no">' +
+        '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">' +
+        '<path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.7" ' +
+        'stroke-linecap="round"/></svg>' + esc(s) + '</span>';
+    }).join('') || '<span class="t-caption">Every required skill was found.</span>';
+
+    var lift = r.Delta > 0
+      ? 'Folding synonyms recovered <strong>' + r.Delta.toFixed(1) +
+        ' points</strong> that plain keyword matching missed — the resume and the ' +
+        'description describe the same skills in different words.'
+      : r.Delta < 0
+      ? 'Normalisation moved this score down slightly (' + r.Delta.toFixed(1) +
+        ' points): collapsing synonyms onto one token also concentrates the ' +
+        'vocabulary the two documents do not share.'
+      : 'Normalisation made no difference here — both documents already used the ' +
+        'same wording.';
+
+    return '' +
+      '<div class="detail-head">' +
+        '<div>' +
+          '<h1>' + esc(r.Candidate) + '</h1>' +
+          verdictPill(v) +
+          '<span class="t-caption" style="margin-left:9px">Rank ' + rank + ' of ' + DATA.length + '</span>' +
+        '</div>' +
+        '<div class="score-block">' +
+          '<div class="t-display">' + score.toFixed(1) + '<span style="font-size:20px">%</span></div>' +
+          '<div class="t-label" style="margin-top:2px">' +
+            (state.mode === 'hybrid' ? 'Hybrid similarity' : 'Baseline similarity') + '</div>' +
+          '<div class="scale">' +
+            '<div class="scale-track">' +
+              '<div class="scale-fill" style="width:' + Math.min(100, score) + '%"></div>' +
+              '<div class="scale-median" style="left:' + Math.min(100, med) + '%" ' +
+                   'title="pool median"></div>' +
+            '</div>' +
+            '<div class="scale-legend"><span>0%</span>' +
+              '<span>median ' + med.toFixed(1) + '%</span><span>100%</span></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="section">' +
+        '<div class="reason">' + esc(r.Reason) + '</div>' +
+      '</div>' +
+
+      '<div class="section">' +
+        '<div class="section-head"><h2>Skill coverage</h2>' +
+          '<span class="note">' + r.Matched_Count + ' of ' + r.Total_Skills +
+          ' required skills</span></div>' +
+        '<div style="display:flex;align-items:center;gap:13px;margin-bottom:13px">' +
+          meter(r.Matched_Count, r.Total_Skills, true) +
+        '</div>' +
+        '<div>' + matched + '</div>' +
+        '<div style="margin-top:9px">' + missing + '</div>' +
+      '</div>' +
+
+      '<div class="section">' +
+        '<div class="section-head"><h2>What drove the score</h2>' +
+          '<span class="note">share of the similarity score, exact</span></div>' +
+        '<div class="bars">' + bars + '</div>' +
+        '<p class="t-caption" style="margin:11px 0 0">' +
+          'TF-IDF vectors are L2-normalised, so the similarity score is the dot ' +
+          'product of the two vectors. Each bar is one term’s exact share of ' +
+          'that total — not an approximation.</p>' +
+      '</div>' +
+
+      '<div class="section">' +
+        '<div class="section-head"><h2>Baseline vs hybrid</h2></div>' +
+        '<div class="delta-explain">' +
+          '<div class="leg"><div class="v num">' + r['Baseline_TFIDF_%'].toFixed(1) + '%</div>' +
+            '<div class="t-caption">baseline</div></div>' +
+          '<svg class="arrow" width="19" height="14" viewBox="0 0 20 14" fill="none" aria-hidden="true">' +
+            '<path d="M1 7h17M13 2l5 5-5 5" stroke="currentColor" stroke-width="1.6" ' +
+            'stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+          '<div class="leg"><div class="v num">' + r['Hybrid_Match_%'].toFixed(1) + '%</div>' +
+            '<div class="t-caption">hybrid</div></div>' +
+          '<div class="txt">' + lift + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function poolPanel() {
+    var rows = INSIGHTS.map(function (s) {
+      var gap = s.pct < 50;
+      return '<div class="insight-row">' +
+               '<div class="insight-skill">' + esc(s.skill) + '</div>' +
+               '<div class="insight-track"><div class="insight-fill' + (gap ? ' gap' : '') +
+                 '" style="width:' + Math.max(1, s.pct) + '%"></div></div>' +
+               '<div class="insight-val">' + s.have + '/' + DATA.length + '</div>' +
+             '</div>';
+    }).join('');
+
+    var worst = INSIGHTS.length ? INSIGHTS[0] : null;
+    var lead = worst
+      ? 'Only <strong>' + worst.have + ' of ' + DATA.length + '</strong> candidates show ' +
+        '<strong>' + esc(worst.skill) + '</strong>. If that requirement is negotiable, ' +
+        'relaxing it opens the pool the most.'
+      : '';
+
+    return '' +
+      '<div class="section">' +
+        '<div class="section-head"><h2>Where this pool is thin</h2>' +
+          '<span class="note">scarcest requirement first</span></div>' +
+        '<div class="reason" style="margin-bottom:15px">' + lead + '</div>' +
+        rows +
+      '</div>' +
+      '<p class="t-caption">Counts come from the same checklist match used for each ' +
+      'candidate’s verdict, so a skill counted here is a skill found in that resume.</p>';
+  }
+
+  function comparePanel() {
+    /* The picker stays visible at all times — selecting a second candidate
+       must not remove the control you need to select a third. */
+    var full = state.compare.length >= 3;
+    var picker =
+      '<div class="section">' +
+        '<div class="section-head"><h2>Compare</h2>' +
+          '<span class="note">' + state.compare.length + ' of 3 selected</span></div>' +
+        '<div class="cmp-picker">' +
+          DATA.map(function (r) {
+            var on = state.compare.indexOf(r.Candidate) !== -1;
+            return '<button type="button" class="cmp-tog' + (on ? ' on' : '') + '" ' +
+                   'data-cmp="' + esc(r.Candidate) + '" aria-pressed="' + on + '"' +
+                   (!on && full ? ' disabled' : '') + '>' + esc(r.Candidate) + '</button>';
+          }).join('') +
+        '</div>' +
+      '</div>';
+
+    if (state.compare.length < 2) {
+      return picker +
+        '<div class="empty">' +
+        '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true" ' +
+        'style="color:var(--border-strong)">' +
+        '<path d="M9 4H4v16h5V4zM20 4h-5v16h5V4z" stroke="currentColor" stroke-width="1.6" ' +
+        'stroke-linejoin="round"/></svg>' +
+        '<h2>Pick at least two candidates</h2>' +
+        '<p>Their skill coverage lines up side by side, row by row.</p>' +
+        '</div>';
+    }
+
+    var picked = DATA.filter(function (r) { return state.compare.indexOf(r.Candidate) !== -1; });
+    var skills = picked[0].Matched_Skills.concat(picked[0].Missing_Skills);
+
+    var head = picked.map(function (p) { return '<th class="c">' + esc(p.Candidate) + '</th>'; }).join('');
+
+    var scoreRow = '<tr><td><strong>Hybrid score</strong></td>' + picked.map(function (p) {
+      return '<td class="c num">' + p['Hybrid_Match_%'].toFixed(1) + '%</td>';
+    }).join('') + '</tr>';
+
+    var covRow = '<tr><td><strong>Coverage</strong></td>' + picked.map(function (p) {
+      return '<td class="c num">' + p.Matched_Count + '/' + p.Total_Skills + '</td>';
+    }).join('') + '</tr>';
+
+    var verdictRow = '<tr><td><strong>Verdict</strong></td>' + picked.map(function (p) {
+      return '<td class="c">' + verdictPill(verdictOf(p)) + '</td>';
+    }).join('') + '</tr>';
+
+    var skillRows = skills.map(function (s) {
+      return '<tr><td>' + esc(s) + '</td>' + picked.map(function (p) {
+        var has = p.Matched_Skills.indexOf(s) !== -1;
+        return '<td class="c ' + (has ? 'cmp-yes' : 'cmp-no') + '">' + (has ? '✓' : '·') + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+
+    return picker +
+      '<div class="section">' +
+        '<table class="cmp-table"><thead><tr><th>Attribute</th>' + head + '</tr></thead>' +
+        '<tbody>' + scoreRow + covRow + verdictRow + skillRows + '</tbody></table>' +
+      '</div>';
+  }
+
+  function renderPanel() {
+    panel.innerHTML = state.tab === 'pool'    ? poolPanel()
+                    : state.tab === 'compare' ? comparePanel()
+                    : candidatePanel();
+
+    panel.querySelectorAll('[data-cmp]').forEach(function (tog) {
+      tog.onclick = function () {
+        var name = tog.dataset.cmp;
+        var i = state.compare.indexOf(name);
+        if (i === -1) {
+          if (state.compare.length >= 3) return;
+          state.compare.push(name);
+        } else {
+          state.compare.splice(i, 1);
+        }
+        renderPanel();
+      };
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * controls
+   * ------------------------------------------------------------------ */
+
+  function setMode(mode) {
+    if (state.mode === mode) return;
+    state.mode = mode;
+    document.getElementById('modeHybrid').setAttribute('aria-pressed', mode === 'hybrid');
+    document.getElementById('modeBaseline').setAttribute('aria-pressed', mode === 'baseline');
+    document.getElementById('modeNote').textContent = mode === 'hybrid'
+      ? 'Synonym-aware scoring. Switch to baseline to see the ranking move.'
+      : 'Plain keyword scoring — no synonym handling. This is what the system improves on.';
+    renderRail(true);
+    renderPanel();
+  }
+
+  document.getElementById('modeHybrid').onclick   = function () { setMode('hybrid'); };
+  document.getElementById('modeBaseline').onclick = function () { setMode('baseline'); };
+
+  function syncTabs() {
+    ['candidate', 'pool', 'compare'].forEach(function (t) {
+      document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1))
+              .setAttribute('aria-selected', state.tab === t);
+    });
+  }
+
+  ['candidate', 'pool', 'compare'].forEach(function (t) {
+    document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).onclick = function () {
+      state.tab = t; syncTabs(); renderPanel();
+    };
+  });
+
+  /* Threshold what-if: coverage is already computed, so re-labelling every
+     verdict is a pure client-side pass — no re-run, no server round trip. */
+  var thresh = document.getElementById('thresh');
+  thresh.oninput = function () {
+    state.strongT = parseInt(thresh.value, 10) / 100;
+    document.getElementById('threshVal').textContent = thresh.value + '%';
+    var counts = { strong: 0, moderate: 0 };
+    DATA.forEach(function (r) {
+      var v = verdictOf(r);
+      if (v === 'STRONG MATCH') counts.strong++;
+      else if (v === 'MODERATE MATCH') counts.moderate++;
+    });
+    document.getElementById('sumStrong').textContent = counts.strong;
+    document.getElementById('sumModerate').textContent = counts.moderate;
+    renderRail(false);
+    renderPanel();
+  };
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    e.preventDefault();
+    var list = sorted();
+    var i = list.findIndex(function (d) { return d.Candidate === state.selected; });
+    i = e.key === 'ArrowDown' ? Math.min(list.length - 1, i + 1) : Math.max(0, i - 1);
+    state.selected = list[i].Candidate;
+    state.tab = 'candidate';
+    syncTabs();
+    renderRail(false);
+    renderPanel();
+    var el = rail.querySelector('[aria-current="true"]');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  });
+
+  renderRail(false);
+  renderPanel();
+})();
+</script>
+{% endblock %}

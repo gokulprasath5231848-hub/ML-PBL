@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+{% block title %}Screen resumes{% endblock %}
+{% block subtitle %}Compose{% endblock %}
+
+{% block body %}
+<form class="compose" method="POST" action="{{ url_for('screen') }}"
+      enctype="multipart/form-data" id="composeForm">
+
+  <div class="compose-head">
+    <h1>Screen resumes against a job description</h1>
+    <p class="muted" style="margin:0;max-width:60ch">
+      Every resume is scored twice — a plain keyword baseline and a synonym-aware
+      hybrid score — then checked against a skill checklist drawn from the job
+      description itself. Every ranking comes with the reason behind it.
+    </p>
+  </div>
+
+  {% if error %}
+  <div class="alert" role="alert">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.9" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M8 4.7v3.8M8 11.1h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+    <div>{{ error }}</div>
+  </div>
+  {% endif %}
+
+  {% for n in notices %}
+  <div class="alert alert-note">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M8 1.8l6.2 11.4H1.8L8 1.8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M8 6.4v2.6M8 11.3h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+    <div>{{ n }}</div>
+  </div>
+  {% endfor %}
+
+  <!-- ===================== 1. job description ======================== -->
+  <section class="step">
+    <div class="step-head">
+      <span class="step-num">1</span>
+      <h2>Job description</h2>
+      <span class="hint" id="jdCount">0 characters</span>
+    </div>
+    <textarea class="textarea" name="job_desc_text" id="jdText" rows="9"
+              placeholder="Paste the full job description here — role, responsibilities and the skills you need. The checklist below is built from this text."
+              aria-describedby="jdCount">{{ job_desc_text or '' }}</textarea>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:9px">
+      <button type="button" class="btn btn-sm" id="jdFileBtn">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M9 1.8H4.2c-.66 0-1.2.54-1.2 1.2v10c0 .66.54 1.2 1.2 1.2h7.6c.66 0 1.2-.54 1.2-1.2V5.8L9 1.8z"
+                stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M9 1.8V5.8h4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+        Upload .txt instead
+      </button>
+      <input type="file" name="job_desc_file" id="jdFile" accept=".txt"/>
+      <span class="t-caption" id="jdFileName"></span>
+      <button type="button" class="btn btn-sm" id="sampleBtn" style="margin-left:auto">Load sample</button>
+    </div>
+  </section>
+
+  <!-- ===================== 2. required skills ======================== -->
+  <section class="step">
+    <div class="step-head">
+      <span class="step-num">2</span>
+      <h2>Required skills</h2>
+      <span class="hint">Read from your job description — edit freely</span>
+    </div>
+    <div class="card card-inset">
+      <div class="chips" id="chips"></div>
+      <input type="hidden" name="required_skills" id="skillsField"/>
+      <div style="display:flex;align-items:center;gap:9px;margin-top:12px">
+        <span class="t-caption" id="skillCount">No skills yet</span>
+        <button type="button" class="btn btn-sm" id="reextractBtn" style="margin-left:auto">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M13.6 8a5.6 5.6 0 11-1.64-3.96" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M13.8 1.9v3h-3" stroke="currentColor" stroke-width="1.5"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Re-read from description
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 3. resumes ================================ -->
+  <section class="step">
+    <div class="step-head">
+      <span class="step-num">3</span>
+      <h2>Resumes</h2>
+      <span class="hint">Use either or both</span>
+    </div>
+    <div class="intake-grid">
+
+      <div class="drop" id="csvDrop">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+             style="color:var(--fg-muted)">
+          <path d="M4 7.5V19a2 2 0 002 2h12a2 2 0 002-2V7.5" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round"/>
+          <path d="M3 7.5h18M8 7.5V4a1 1 0 011-1h6a1 1 0 011 1v3.5" stroke="currentColor"
+                stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <h3>Bulk CSV</h3>
+        <p>Columns <code>candidate_name</code> and <code>resume_text</code></p>
+        <button type="button" class="btn btn-sm" data-pick="csvFile">Choose CSV</button>
+        <input type="file" name="resumes_csv" id="csvFile" accept=".csv"/>
+        <div id="csvName"></div>
+      </div>
+
+      <div class="drop" id="fileDrop">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+             style="color:var(--fg-muted)">
+          <path d="M13 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V9l-6-6z"
+                stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M13 3v6h6" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+        <h3>Individual files</h3>
+        <p>PDF, DOCX or TXT</p>
+        <button type="button" class="btn btn-sm" data-pick="resumeFiles">Choose files</button>
+        <input type="file" name="resume_files" id="resumeFiles" accept=".pdf,.docx,.txt" multiple/>
+        <div id="filesName"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <div class="actionbar">
+    <div class="actionbar-inner">
+      <div class="t-caption" id="readyLine">Add a job description to begin</div>
+      <button type="submit" class="btn btn-primary btn-lg" id="runBtn" style="margin-left:auto" disabled>
+        Run screening
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.7"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</form>
+
+<script>
+(function () {
+  var jd        = document.getElementById('jdText');
+  var chipsBox  = document.getElementById('chips');
+  var field     = document.getElementById('skillsField');
+  var runBtn    = document.getElementById('runBtn');
+  var skills    = {{ (skills or []) | tojson }};
+  var debounce  = null;
+
+  /* ---------- skill chips: extracted, then fully editable ------------- */
+
+  function sync() {
+    field.value = skills.join(',');
+    document.getElementById('skillCount').textContent =
+      skills.length ? skills.length + ' skills will be checked on every resume'
+                    : 'No skills yet — they appear as you paste a description';
+    updateReady();
+  }
+
+  function render() {
+    chipsBox.textContent = '';
+    skills.forEach(function (s, i) {
+      var chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.appendChild(document.createTextNode(s));
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'chip-x';
+      x.setAttribute('aria-label', 'Remove ' + s);
+      x.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">' +
+                    '<path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.6" ' +
+                    'stroke-linecap="round"/></svg>';
+      x.onclick = function () { skills.splice(i, 1); render(); sync(); };
+      chip.appendChild(x);
+      chipsBox.appendChild(chip);
+    });
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'chip-add';
+    add.textContent = '+ Add skill';
+    add.onclick = function () {
+      var inp = document.createElement('input');
+      inp.className = 'chip-input';
+      inp.placeholder = 'skill name';
+      chipsBox.replaceChild(inp, add);
+      inp.focus();
+      function commit() {
+        var v = inp.value.trim().toLowerCase();
+        if (v && skills.indexOf(v) === -1) { skills.push(v); }
+        render(); sync();
+      }
+      inp.onkeydown = function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { render(); }
+      };
+      inp.onblur = commit;
+    };
+    chipsBox.appendChild(add);
+  }
+
+  function extract() {
+    var text = jd.value;
+    if (!text.trim()) { skills = []; render(); sync(); return; }
+    fetch('/api/extract-skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_desc_text: text })
+    }).then(function (r) { return r.json(); })
+      .then(function (d) { skills = d.skills; render(); sync(); })
+      .catch(function () { /* extraction is a convenience; the form still works */ });
+  }
+
+  /* ---------- readiness ---------------------------------------------- */
+
+  function hasResumes() {
+    return document.getElementById('csvFile').files.length > 0 ||
+           document.getElementById('resumeFiles').files.length > 0;
+  }
+
+  function updateReady() {
+    var hasJd = jd.value.trim().length > 0 ||
+                document.getElementById('jdFile').files.length > 0;
+    var ok = hasJd && hasResumes();
+    runBtn.disabled = !ok;
+    var line = document.getElementById('readyLine');
+    if (!hasJd)            line.textContent = 'Add a job description to begin';
+    else if (!hasResumes())line.textContent = skills.length + ' skills ready — now add resumes';
+    else {
+      var n = document.getElementById('csvFile').files.length > 0 ? 'CSV' : '';
+      var f = document.getElementById('resumeFiles').files.length;
+      var src = [n, f ? f + ' file' + (f > 1 ? 's' : '') : ''].filter(Boolean).join(' + ');
+      line.textContent = src + ' · ' + skills.length + ' skills · ready to screen';
+    }
+  }
+
+  jd.addEventListener('input', function () {
+    document.getElementById('jdCount').textContent = jd.value.length + ' characters';
+    clearTimeout(debounce);
+    debounce = setTimeout(extract, 450);
+    updateReady();
+  });
+
+  document.getElementById('reextractBtn').onclick = extract;
+
+  /* ---------- file pickers + drag and drop ---------------------------- */
+
+  function pill(target, name) {
+    target.innerHTML = '';
+    var p = document.createElement('span');
+    p.className = 'file-pill';
+    p.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">' +
+                  '<path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" stroke-width="1.8" ' +
+                  'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    var s = document.createElement('span');
+    s.textContent = name;
+    p.appendChild(s);
+    target.appendChild(p);
+  }
+
+  document.querySelectorAll('[data-pick]').forEach(function (b) {
+    b.onclick = function () { document.getElementById(b.dataset.pick).click(); };
+  });
+
+  document.getElementById('csvFile').onchange = function () {
+    if (this.files[0]) pill(document.getElementById('csvName'), this.files[0].name);
+    updateReady();
+  };
+  document.getElementById('resumeFiles').onchange = function () {
+    if (this.files.length) {
+      pill(document.getElementById('filesName'),
+           this.files.length === 1 ? this.files[0].name : this.files.length + ' files selected');
+    }
+    updateReady();
+  };
+  document.getElementById('jdFileBtn').onclick = function () {
+    document.getElementById('jdFile').click();
+  };
+  document.getElementById('jdFile').onchange = function () {
+    if (this.files[0]) document.getElementById('jdFileName').textContent = this.files[0].name;
+    updateReady();
+  };
+
+  [['csvDrop', 'csvFile'], ['fileDrop', 'resumeFiles']].forEach(function (pair) {
+    var zone = document.getElementById(pair[0]);
+    var input = document.getElementById(pair[1]);
+    ['dragenter', 'dragover'].forEach(function (e) {
+      zone.addEventListener(e, function (ev) {
+        ev.preventDefault(); zone.classList.add('is-over');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (e) {
+      zone.addEventListener(e, function (ev) {
+        ev.preventDefault(); zone.classList.remove('is-over');
+      });
+    });
+    zone.addEventListener('drop', function (ev) {
+      input.files = ev.dataTransfer.files;
+      input.dispatchEvent(new Event('change'));
+    });
+  });
+
+  /* ---------- sample loader ------------------------------------------- */
+
+  document.getElementById('sampleBtn').onclick = function () {
+    jd.value = 'Job Title: Machine Learning Engineer\n\n' +
+      'We are looking for a Machine Learning Engineer with strong experience in Python,\n' +
+      'Natural Language Processing (NLP), and predictive modeling. The candidate should\n' +
+      'be skilled in building and deploying machine learning models using frameworks such\n' +
+      'as scikit-learn, TensorFlow, or PyTorch. Experience with data analysis, SQL, and\n' +
+      'cloud platforms (AWS/Azure) is preferred.';
+    jd.dispatchEvent(new Event('input'));
+  };
+
+  render();
+  sync();
+  if (jd.value.trim() && !skills.length) extract();
+  document.getElementById('jdCount').textContent = jd.value.length + ' characters';
+})();
+</script>
+{% endblock %}
